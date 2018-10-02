@@ -12,6 +12,7 @@ from gevent.queue import Queue
 from geventwebsocket import WebSocketError
 
 from bottle import run, request, response, Bottle, HTTPResponse
+from bottle import get, post, install, abort, delete, put
 
 from moulinette import msignals, m18n, DATA_DIR
 from moulinette.core import MoulinetteError, clean_session
@@ -26,6 +27,47 @@ logger = log.getLogger('moulinette.interface.api')
 
 
 # API helpers ----------------------------------------------------------
+
+CSRF_TYPES = set(["text/plain",
+                  "application/x-www-form-urlencoded",
+                  "multipart/form-data"])
+
+
+def is_csrf():
+    """Checks is this is a CSRF request."""
+
+    if request.method != "POST":
+        return False
+    content_type = request.content_type.lower().split(';')[0]
+    if content_type not in CSRF_TYPES:
+        return False
+
+    host = request.headers.get("host")
+    if host is None:
+        return True
+    expected_origin = "https://" + host
+
+    origin = request.headers.get("origin")
+    if origin is not None:
+        return origin != expected_origin
+
+    referrer = request.headers.get("referer")
+    if referrer is not None:
+        return (referrer != expected_origin and
+                not referrer.startswith(expected_origin + "/"))
+
+    return True
+
+
+# Protection against CSRF
+def filter_csrf(callback):
+    def wrapper(*args, **kwargs):
+        if is_csrf():
+            abort(403, "CSRF protection")
+        else:
+            return callback(*args, **kwargs)
+    return wrapper
+
 
 class LogQueues(dict):
     """Map of session id to queue."""
@@ -723,6 +765,7 @@ class Interface(BaseInterface):
             return callback
 
         # Install plugins
+        app.install(filter_csrf)
         app.install(apiheader)
         app.install(api18n)
         app.install(_ActionsMapPlugin(actionsmap, use_websocket, log_queues))
