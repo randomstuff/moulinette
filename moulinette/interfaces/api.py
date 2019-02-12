@@ -43,7 +43,43 @@ def is_csrf():
     if content_type not in CSRF_TYPES:
         return False
 
-    return request.headers.get("X-Requested-With") is None
+    # We assume the Host header was passed from the reverse proxy:
+    # we use it to validate the Origin and Referer headers.
+    host = request.headers.get("host")
+    if host is None:
+        return True
+    expected_origin = "https://" + host
+
+    origin_validated = False
+
+    # If Origin header is present, verify it:
+    origin = request.headers.get("origin")
+    if origin is not None:
+        if origin == expected_origin:
+            # Probably OK but we still check if Referer is present:
+            origin_validated = True
+        else:
+            return True
+
+    # If Referer header is present, verify it:
+    referrer = request.headers.get("referer")
+    if referrer is not None:
+        if referrer == expected_origin:
+            origin_validated = True
+        elif referrer.startswith(expected_origin + "/"):
+            origin_validated = True
+        else:
+            return True
+
+    # If either Origin and Referer was validated, we're OK:
+    if origin_validated:
+        return False
+
+    # If custom HTTP header is included, we're OK:
+    if request.headers.get("X-Requested-With") is not None:
+        return False
+
+    return True
 
 
 # Protection against CSRF
